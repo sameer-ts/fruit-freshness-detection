@@ -1,1 +1,75 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Fruit Freshness Detection</title>
 
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f2f7f2;
+            text-align: center;
+            padding: 50px;
+        }
+
+        .container {
+            background: white;
+            max-width: 600px;
+            margin: auto;
+            padding: 40px;
+            border-radius: 15px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.15);
+        }
+
+        h1 {
+            color: #2e7d32;
+        }
+
+        input {
+            margin: 25px;
+        }
+
+        button {
+            background: #2e7d32;
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+        button:hover {
+            background: #1b5e20;
+        }
+    </style>
+</head>
+
+<body>
+
+<div class="container">
+
+    <h1>🍎 Fruit Freshness Detection</h1>
+
+    <p>Upload a fruit image to check its freshness.</p>
+
+    <form action="/predict" method="POST" enctype="multipart/form-data">
+
+        <input
+            type="file"
+            name="image"
+            accept="image/*"
+            required
+        >
+
+        <br>
+
+        <button type="submit">
+            Detect Freshness
+        </button>
+
+    </form>
+
+</div>
+
+</body>
+</html>
