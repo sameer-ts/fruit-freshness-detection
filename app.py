@@ -1,17 +1,22 @@
 from flask import Flask, render_template, request
-from tensorflow.keras.models import load_model
 from PIL import Image
 import numpy as np
-import os
+import tensorflow as tf
 
 app = Flask(__name__)
 
-MODEL_PATH = "fruit_freshness_model.h5"
+# TensorFlow Lite model
+MODEL_PATH = "fruit_freshness_model.tflite"
 
 # Load model
-model = load_model(MODEL_PATH)
+interpreter = tf.lite.Interpreter(model_path=MODEL_PATH)
+interpreter.allocate_tensors()
 
-# Change these according to your trained model
+input_details = interpreter.get_input_details()
+output_details = interpreter.get_output_details()
+
+# IMPORTANT:
+# These must match the classes used when your model was trained.
 classes = [
     "Fresh Apple",
     "Fresh Banana",
@@ -38,33 +43,56 @@ def predict():
     if file.filename == "":
         return "No image selected"
 
-    # Open image
-    image = Image.open(file).convert("RGB")
+    try:
+        # Open uploaded image
+        image = Image.open(file).convert("RGB")
 
-    # Your model uses 150 x 150 images
-    image = image.resize((150, 150))
+        # Your original model uses 150 x 150 images
+        image = image.resize((150, 150))
 
-    # Convert image to numpy array
-    image_array = np.array(image) / 255.0
+        # Convert image to NumPy
+        image_array = np.array(image, dtype=np.float32)
 
-    # Add batch dimension
-    image_array = np.expand_dims(image_array, axis=0)
+        # Normalize
+        image_array = image_array / 255.0
 
-    # Prediction
-    prediction = model.predict(image_array)
+        # Add batch dimension
+        image_array = np.expand_dims(image_array, axis=0)
 
-    predicted_class = np.argmax(prediction)
+        # Send image to TensorFlow Lite
+        interpreter.set_tensor(
+            input_details[0]["index"],
+            image_array
+        )
 
-    confidence = float(np.max(prediction)) * 100
+        # Run prediction
+        interpreter.invoke()
 
-    result = classes[predicted_class]
+        # Get result
+        prediction = interpreter.get_tensor(
+            output_details[0]["index"]
+        )
 
-    return render_template(
-        "result.html",
-        result=result,
-        confidence=round(confidence, 2)
-    )
+        predicted_class = np.argmax(prediction[0])
+
+        confidence = float(
+            prediction[0][predicted_class]
+        ) * 100
+
+        result = classes[predicted_class]
+
+        return render_template(
+            "result.html",
+            result=result,
+            confidence=round(confidence, 2)
+        )
+
+    except Exception as e:
+        return f"Error: {str(e)}"
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(
+        host="0.0.0.0",
+        port=5000
+    )
