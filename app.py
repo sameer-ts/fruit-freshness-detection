@@ -2,21 +2,13 @@ from flask import Flask, render_template, request
 from PIL import Image
 import numpy as np
 import tensorflow as tf
+import os
 
 app = Flask(__name__)
 
-# TensorFlow Lite model
-MODEL_PATH = "fruit_freshness_model.tflite"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MODEL_PATH = os.path.join(BASE_DIR, "fruit_freshness_model.tflite")
 
-# Load model
-interpreter = tf.lite.Interpreter(model_path=MODEL_PATH)
-interpreter.allocate_tensors()
-
-input_details = interpreter.get_input_details()
-output_details = interpreter.get_output_details()
-
-# IMPORTANT:
-# These must match the classes used when your model was trained.
 classes = [
     "Fresh Apple",
     "Fresh Banana",
@@ -26,6 +18,12 @@ classes = [
     "Rotten Orange"
 ]
 
+interpreter = tf.lite.Interpreter(model_path=MODEL_PATH)
+interpreter.allocate_tensors()
+
+input_details = interpreter.get_input_details()
+output_details = interpreter.get_output_details()
+
 
 @app.route("/")
 def home():
@@ -34,65 +32,84 @@ def home():
 
 @app.route("/predict", methods=["POST"])
 def predict():
-
     if "image" not in request.files:
-        return "No image selected"
+        return "Please select an image."
 
     file = request.files["image"]
 
-    if file.filename == "":
-        return "No image selected"
+    if not file.filename:
+        return "Please select an image."
 
     try:
-        # Open uploaded image
         image = Image.open(file).convert("RGB")
-
-        # Your original model uses 150 x 150 images
         image = image.resize((150, 150))
 
-        # Convert image to NumPy
-        image_array = np.array(image, dtype=np.float32)
-
-        # Normalize
+        image_array = np.asarray(image, dtype=np.float32)
         image_array = image_array / 255.0
-
-        # Add batch dimension
         image_array = np.expand_dims(image_array, axis=0)
 
-        # Send image to TensorFlow Lite
-        interpreter.set_tensor(
-            input_details[0]["index"],
-            image_array
-        )
+        input_info = input_details[0]
+        input_dtype = input_info["dtype"]
 
-        # Run prediction
+        # Handle quantized integer model inputs.
+        if np.issubdtype(input_dtype, np.integer):
+            scale, zero_point = input_info["quantization"]
+
+            if scale > 0:
+                image_array = np.round(
+                    image_array / scale + zero_point
+                )
+
+            limits = np.iinfo(input_dtype)
+            image_array = np.clip(
+                image_array, limits.min, limits.max
+            ).astype(input_dtype)
+        else:
+            image_array = image_array.astype(input_dtype)
+
+        interpreter.set_tensor(
+            input_info["index"], image_array
+        )
         interpreter.invoke()
 
-        # Get result
         prediction = interpreter.get_tensor(
             output_details[0]["index"]
-        )
+        ).flatten()
 
-        predicted_class = np.argmax(prediction[0])
+        print("Model output:", prediction)
+        print("Output shape:", prediction.shape)
 
-        confidence = float(
-            prediction[0][predicted_class]
-        ) * 100
+        if len(prediction) != len(classes):
+            return (
+                "Model output mismatch: expected 6 class scores, "
+                f"but received {len(prediction)}. "
+                "Check the model's output and training labels."
+            ), 500
 
+        predicted_class = int(np.argmax(prediction))
         result = classes[predicted_class]
+
+        # Scores are displayed for diagnosis.
+        scores = {
+            name: round(float(score), 4)
+            for name, score in zip(classes, prediction)
+        }
+
+        # Valid as a probability percentage only when the
+        # model outputs probabilities, such as a softmax layer.
+        confidence = float(prediction[predicted_class]) * 100
 
         return render_template(
             "result.html",
             result=result,
-            confidence=round(confidence, 2)
+            confidence=round(confidence, 2),
+            scores=scores
         )
 
     except Exception as e:
-        return f"Error: {str(e)}"
+        app.logger.exception("Prediction failed")
+        return f"Prediction error: {str(e)}", 500
 
 
 if __name__ == "__main__":
-    app.run(
-        host="0.0.0.0",
-        port=5000
-    )
+    app.run(host="0.0.0.0", port=5000)
